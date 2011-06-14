@@ -1,0 +1,8 @@
+bwt
+*.prof
+*.o
+*.hi
+*.bz
+*.bz2
+*.gz
+*.bz
