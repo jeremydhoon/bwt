@@ -1,6 +1,7 @@
 module UnicodeMtf where
 
 import qualified Data.Char as Char
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Debug.Trace as Trace
@@ -68,8 +69,9 @@ mtf s = reverseSnd $ foldl addIx (empty,[]) s
         (um',ix) = getIx c um
     
 reverseMtf :: [Int] -> String
-reverseMtf is = reverseSnd $ foldl addC (empty, []) is
+reverseMtf is = reverseSnd $ List.foldl' addC (empty, []) is
   where
-    addC (um,ret) i = (um', c:ret)
+    addC (um,ret) i = seq (seq um' ret') (um', ret')
       where
         (um',c) = getC i um
+        ret' = seq c $ c:ret

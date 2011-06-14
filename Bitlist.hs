@@ -1,6 +1,7 @@
 module Bitlist where
 
 import qualified Data.Bits as Bits
+import qualified Data.List as List
 import qualified Data.Word as Word
 
 type Bitlist = ([Word.Word8], Int)
@@ -43,18 +44,21 @@ unpackWord :: [Bool] -> Word.Word8 -> [Bool]
 unpackWord acc wrd = handleBit acc 8 wrd
   where
     rshift wrd = wrd `Bits.shiftR` 1
-    boolify wrd = (wrd `mod` 2) > 0
+    boolify wrd = (wrd Bits..&. 0x1) > 0
     handleBit ret 0 wrd = ret
     handleBit ret count wrd =
-      handleBit ((boolify wrd):ret) (count - 1) (rshift wrd)
+      seq ret' $ handleBit ret' (count - 1) (rshift wrd)
+      where
+        bit = boolify wrd
+        ret' = seq bit $ bit:ret
 
 unpackBits :: Bitlist -> [Bool]
 unpackBits (wrds, nbits) =
   if (nbits `mod` 8) /= 0 then unpacked else alt
   where
     (start,last) = splitAt ((length wrds) - 1) $ wrds
-    front = foldl unpackWord [] $ reverse start
+    front = List.foldl' unpackWord [] $ reverse start
     lastWordBits = unpackWord [] (head last)
     back = trimToLength (nbits `mod` 8) lastWordBits
     unpacked = front ++ back
-    alt = foldl unpackWord [] $ reverse wrds
+    alt = List.foldl' unpackWord [] $ reverse wrds

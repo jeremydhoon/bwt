@@ -4,6 +4,7 @@ import qualified Control.Exception as Exception
 import qualified Control.Monad as Monad
 import qualified Control.Monad.ST as ST
 import qualified Data.Array as Array
+import Data.Array ((!))
 import qualified Data.Array.Unboxed as UArray
 import qualified Data.Array.ST as STArray
 import qualified Data.Binary as Binary
@@ -23,7 +24,7 @@ import qualified UnicodeMtf as Mtf
 
 type DefaultArray = Array.Array
 
-(!) = (Array.!)
+--(!) = (Array.!)
 {-
 (!) :: (Show i, Show e, Ix.Ix i) => DefaultArray i e -> i -> e
 arr ! i =
@@ -55,126 +56,17 @@ instance Ord Rotstr where
         where
           outcome = compare (rotstrIndex a i) (rotstrIndex b i)
 
-findLimits :: (Show key, Ix.Ix key) => (val -> key) -> [val] -> (key, key)
-findLimits _ [] = error "findLimits: cannot find limits of empty list."
-findLimits keyfn (v:vs) = Trace.trace (show $ k1:keys) $
-  List.foldl' (\(mn,mx) k -> (min mn k, max mx k)) (k1, k1) keys
-  where
-    keys = map keyfn vs
-    k1 = keyfn v
-
-getCircular :: DefaultArray Int Char -> Int -> Char
-getCircular a i = (!) a $! ((i - mn) `mod` (mx - mn + 1)) + mn
-  where
-    (mn,mx) = Array.bounds a
-
-buildKeyfn :: DefaultArray Int Char -> Int -> (Int -> Int)
-buildKeyfn fs n = Trace.trace (show fs) $
-  (keysArray !)
-  where
-    indices = Array.indices fs
-    n = (snd $ Array.bounds fs) + 1
-    get = (fs !)
-    cmp i j = compare (get i) (get j)
-    extractOrd = Char.ord . get
-    maxEle = extractOrd $! List.maximumBy cmp indices
-    minEle = extractOrd $! List.minimumBy cmp indices
-    shift = Trace.trace (show maxEle) $ (maxEle - minEle) + 1
-    getOMod = Char.ord . (getCircular fs)
-    consume i tot j = Exception.assert (cOrd >= 0) $ (tot * shift) + cOrd
-      where
-        cOrd = (getOMod (i + j)) - minEle
-    keys = map (\i -> foldl (consume i) 0 [0..(n-1)]) indices
-    keysArray = Array.listArray (Array.bounds fs) keys
-
-buildCountArray :: DefaultArray Int Char -> (Int, Int) -> (Int -> Int) ->
-  DefaultArray Int Int
-buildCountArray a limits keyfn = STArray.runSTArray $ do
-  let indices = Array.indices a
-  arr <- STArray.newArray limits 0
-  assocs <- STArray.getAssocs arr
-  let arrIndices = map fst assocs
-  mapM (\i -> do
-    let k = keyfn i
-    count <- STArray.readArray arr k
-    STArray.writeArray arr k (count + 1))
-    indices
-  mapM (\(prev,curr) -> do
-   prevCount <- STArray.readArray arr prev
-   currCount <- STArray.readArray arr curr
-   STArray.writeArray arr curr (prevCount + currCount)) $
-   zip arrIndices (tail arrIndices)
-  return arr
-  
-swapElements arr i j = do
-  ival <- STArray.readArray arr i
-  jval <- STArray.readArray arr j
-  STArray.writeArray arr i jval
-  STArray.writeArray arr j ival
-
-qsortSegment arr keyfn start len = Monad.when (len > 0) $ do
-  pivotValue <- STArray.readArray arr start
-  let pivot = keyfn pivotValue
-  let swap = swapElements arr
-  let right = start + len - 1
-  swap start right
-  slot <- Foldable.foldlM (\slot i -> do
-    currValue <- STArray.readArray arr i
-    let currKey = keyfn currValue
-    if currKey <= pivot
-      then do
-        swap slot i
-        return (slot + 1)
-      else do
-        return slot)
-    start [start..(right - 1)]
-  swap slot right
-  qsortSegment arr keyfn start (slot - start - 1)
-  qsortSegment arr keyfn (slot + 1) (right - slot)
-
-sortBinsInpl :: DefaultArray Int Int -> DefaultArray Int Char -> (Int, Int)
-  -> (Int -> Int) -> [Int]
-sortBinsInpl counts fs limits keyfn = Array.elems $ STArray.runSTArray $ do
-  let cindices = Array.indices counts
-  let bounds = (Array.bounds fs) :: (Int, Int)
-  let _ = Trace.trace "buiding off" ()
-  off <- (STArray.newArray limits 0) :: ((ST.ST s) (STArray.STArray s Int Int))
-  monolithicArray <- STArray.newArray_ bounds
-  Monad.forM_ (Array.indices fs ) (\i -> do
-    let k = keyfn i
-    let binOff = counts ! k
-    binIx <- STArray.readArray off k
-    let ix = (binOff + binIx) :: Int
-    STArray.writeArray off (k :: Int) ((binIx + 1) :: Int)
-    STArray.writeArray monolithicArray ix i)
-  let (mn,mx) = bounds
-  let _ = Trace.trace "qsorting..." ()
-  qsortSegment monolithicArray keyfn mn (mx - mn + 1)
-  return monolithicArray
-
-bwtInPlace :: String -> (Int, String)
-bwtInPlace [] = (0, [])
-bwtInPlace (hd:[]) = (1, [hd])
-bwtInPlace s = (ixEnd, map (\i -> getCircular fs (i + n - 1)) sortedIndices)
-  where
-    n = length s
-    fs = buildFixstr s
-    keyfn = buildKeyfn fs 2
-    limits = findLimits keyfn (Array.indices fs)
-    counts = Trace.trace (show limits) $ buildCountArray fs limits keyfn
-    sortedIndices = Trace.trace (show counts) $ sortBinsInpl counts fs limits keyfn
-    ixEnd = case List.elemIndex 0 sortedIndices of
-      Just i -> i
-      Nothing -> error "bwtInPlace: no zero index" 
-
-binElements :: Ix.Ix key => (val -> key) -> [val] -> Array.Array key [val]
+binElements :: (Show key, Ix.Ix key) => (val -> key) -> [val] -> Array.Array key [val]
 binElements _ [] = error "binElements: cannot bin empty list"
 binElements keyfn vs = STArray.runSTArray $ do
   let hd = keyfn $ head vs
-  let extrema (mn,mx) k = (min mn $! keyfn k, max mx $! keyfn k)
-  let limits = List.foldl' extrema (hd,hd) vs
+  let extrema (mn,mx) k = (min mn k, max mx k)
+  let keys = map keyfn vs
+  let mn = List.foldl' min hd keys
+  let mx = List.foldl' max hd keys
+  let limits = (mn,mx)
   binArray <- STArray.newArray limits []
-  mapM (\v -> do
+  mapM_ (\v -> do
     let k = keyfn v
     bin <- (STArray.readArray binArray k)
     STArray.writeArray binArray k (v:bin))
@@ -198,8 +90,12 @@ bwtFast s = (ixEnd, last)
     get = (fs !)
     getMod i = fs ! (i `mod` n)
     maxEle = Char.ord $! List.maximum s
+    minEle = Char.ord $! List.minimum s
+    shift = (maxEle - minEle) + 1
+    getRank i= (Char.ord (get i)) - minEle
+    getModRank i = (Char.ord (getMod i)) - minEle
     keyfn = if n > 1 then
-      \v -> ((Char.ord $ get v) * maxEle) + (Char.ord $ getMod (v+1))
+      \v -> ((getRank v) * shift) + (getModRank (v+1))
       else Char.ord . get
     lastMod i = fs ! ((i + (n - 1)) `mod` n)
     bins = binElements keyfn indices
@@ -257,13 +153,35 @@ buildBwtShiftVector s = UArray.listArray (0, (length tlist) - 1) tlist
   where
     f = List.sort s
     handleChr (mSearchStr, ret) c =
-      Exception.assert (ix < (length f) && ix >= 0) (mSearchStr', ix:ret)
+      seq (seq mSearchStr' nextRet) (mSearchStr', nextRet)
       where
         (s', off) = Map.findWithDefault (f, 0) c mSearchStr
         (prefix,suffix) = List.break (\c' -> c == c') s'
         ix = off + (length prefix)
         mSearchStr' = Map.insert c (tail suffix, ix + 1) mSearchStr
-    tlist = reverse $ snd $ List.foldl' handleChr (Map.empty, []) s
+        nextRet = ix:ret
+    tlist = reverse $! snd $! List.foldl' handleChr (Map.empty, []) s
+
+seq2 a b c = seq (seq a b) c
+seq3 a b c d = seq (seq2 a b c) d
+seq4 a b c d e = seq (seq3 a b c d) e
+
+buildBwtShiftVectorFast :: String -> Shiftvector
+buildBwtShiftVectorFast s = Array.listArray (0, (length s) - 1) tlist
+  where
+    f = List.sort s
+    addIndex m (c,i) = seq3 is is' m' m'
+      where
+        is = Map.findWithDefault [] c m
+        is' = i:is
+        m' = Map.insert c is' m
+    charIndices = List.foldl' addIndex Map.empty $ zip f [0..]
+    removeIndex (m,tlist) c = seq3 hd m' tlist' (m',tlist')
+      where
+        (hd:is) = m Map.! c
+        m' = Map.insert c is m
+        tlist' = hd:tlist
+    tlist = snd $ List.foldl' removeIndex (charIndices,[]) $! reverse s
 
 reverseBwtFast :: String -> Int -> String
 reverseBwtFast [] _ = []
@@ -271,17 +189,16 @@ reverseBwtFast s ixEnd =
   Exception.assert (ixEnd <= (length s) && ixEnd >= 0) s'
   where
     len = length s
-    t = buildBwtShiftVector s
+    t = buildBwtShiftVectorFast s
     l = (UArray.listArray (0, (length s) - 1) s) :: DefaultArray Int Char
     getc = (l !)
     gett = (t !)
-    getNext ret i sz = --Exception.assert (i < (length s) && i >= 0) $
-      if sz' == len then ret' else getNext ret' ti sz'
+    nextChar (cs,i) _ = seq2 cs' i' (cs', i')
       where
-        ret' = (getc i):ret
-        ti = gett i
-        sz' = sz + 1
-    s' = getNext [] ixEnd 0
+        c = getc i
+        cs' = seq c (c:cs)
+        i' = gett i
+    s' = fst $ List.foldl' nextChar ([], ixEnd) [1..len]
    
 data RLList a = RLList [(a, Int)]
 
@@ -297,11 +214,10 @@ runLengthEncode s = RLList $ reverse $ (prev,n):pairs
     (prev,n,pairs) = List.foldl' countC (head s, 1, []) $ tail s
 
 runLengthDecodePairs :: (Eq a, Integral b) => [(a, b)] -> [a]
-runLengthDecodePairs pairs = down [] pairs
+runLengthDecodePairs pairs = List.foldl' Common.revAppend [] dupls
   where
-    down ret [] = reverse ret
-    down ret ((c,0):rest) = down ret rest
-    down ret ((c,i):rest) = down (c:ret) ((c,i-1):rest)
+    duplicate c n = List.foldl' (\cs _ -> c:cs) [] [0..(n-1)]
+    dupls = List.foldl' (\acc pair -> ((uncurry duplicate) pair):acc) [] pairs
 
 runLengthDecode :: Eq a => RLList a -> [a]
 runLengthDecode (RLList pairs) = runLengthDecodePairs pairs
@@ -327,13 +243,20 @@ splitRlPairs pairs = (reverse accCount, reverse accChar)
     (accCount,accChar) = List.foldl' handlePair ([],[]) pairs
 
 assembleRLList :: [Bool] -> [a] -> [Word.Word8] -> RLList a
-assembleRLList isRl chars counts = RLList $ consume [] isRl chars counts
+assembleRLList isRl chars counts = RLList $! consume [] isRl chars counts
   where
     consume ret [] [] [] = reverse ret
     consume ret (True:rlRest) (c:cRest) (n:nRest) =
-      consume ((c,fromIntegral n):ret) rlRest cRest nRest
+      seq ret' $ consume ret' rlRest cRest nRest
+      where
+        n' = fromIntegral n
+        rethd = seq n' (c,n')
+        ret' = seq rethd $ rethd:ret
     consume ret (False:rlRest) (c:cRest) ns =
-      consume ((c,1):ret) rlRest cRest ns
+      seq ret' $ consume ret' rlRest cRest ns
+      where
+        rethd = (c,1)
+        ret' = seq rethd $ rethd:ret 
     consume _ [] _ _ = error "assembleRLList: ran out of flags"
     consume _ _ [] _ = error "assembleRLList: ran out of chars"
     consume _ _ _ [] = error "assembleRLList: ran out of counts"
@@ -364,13 +287,13 @@ encode xs =
 decode :: CodedBlock -> String
 decode (CodedBlock ixEnd treeLen treeSymb bitsIsRl bitsLen bitsSym) = s
   where
-    log a b = b --Trace.trace
-    lengths = log "dec lengths" $ Huff.huffdecode treeLen bitsLen
-    symbols = log "dec symbols" $ Huff.huffdecode treeSymb bitsSym
-    flags = log "dec flags" $ Bitlist.unpackBits bitsIsRl
-    rl = log "assembling rl list" $ assembleRLList flags symbols lengths
-    mtfDec = log "dec rle, mtf" $ Mtf.reverseMtf $ runLengthDecode rl
-    s = log "dec bwt" $ reverseBwtFast mtfDec ixEnd
+    log a b = b -- Trace.trace a b
+    lengths = log "dec lengths" $! Huff.huffdecode treeLen bitsLen
+    symbols = log "dec symbols" $! Huff.huffdecode treeSymb bitsSym
+    flags = log "dec flags" $! Bitlist.unpackBits bitsIsRl
+    rl = log "assembling rl list" $! assembleRLList flags symbols lengths
+    mtfDec = log "dec rle, mtf" $! Mtf.reverseMtf $! runLengthDecode rl
+    s = log "dec bwt" $! reverseBwtFast mtfDec ixEnd
 
 instance Binary.Binary CodedBlock where
   put (CodedBlock ix treeLen treeSymb bitsIsRl bitsLen bitsSymb) = do

@@ -23,13 +23,6 @@ invertRotstr s =
   where
     buildRotstrZero fs = Bwt.buildRotstr fs 0
 
-keyfnIsOnto :: String -> Bool
-keyfnIsOnto sRaw = all (>= 0) $! map keyfn $ Array.indices fs
-  where
-    s = 'a':'b':sRaw
-    fs = Bwt.buildFixstr s
-    keyfn = Bwt.buildKeyfn fs 2
-
 invertBwt :: String -> Bool
 invertBwt s = s == dec
   where
@@ -37,12 +30,12 @@ invertBwt s = s == dec
     dec = Bwt.reverseBwtFast s' brk
 
 shiftVectorsMatch :: String -> Bool
-shiftVectorsMatch s =
-  s == (map recover $ UArray.elems t)
+shiftVectorsMatch s = s == result
   where
-    t = Bwt.buildBwtShiftVector s
+    t = Bwt.buildBwtShiftVectorFast s
     f = List.sort s
     recover = (f !!)
+    result = map recover $ UArray.elems t
 
 invertRle :: String -> Bool
 invertRle s = s == (Bwt.runLengthDecode $ Bwt.runLengthEncode s)
@@ -94,7 +87,6 @@ invertEncoding sRaw = s == dec
 main :: IO ()
 main = do
   Qc.quickCheck invertRotstr
-  --Qc.quickCheck keyfnIsOnto
   Qc.quickCheck invertBwt
   Qc.quickCheck shiftVectorsMatch
   Qc.quickCheck invertRle
