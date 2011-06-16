@@ -13,5 +13,6 @@ main = do
   let enc = Bwt.encode $ take blocksize contents
   
   Binary.encodeFile "out.bz" enc
+  putStrLn "encoding complete..."
   unbin <- Binary.decodeFile "out.bz"
   putStrLn $ Bwt.decode unbin
