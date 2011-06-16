@@ -2,6 +2,7 @@ module TestBwt where
 
 import qualified Data.Array as Array
 import qualified Data.Array.Unboxed as UArray
+import qualified Data.Array.ST as ST
 import qualified Data.Binary as Binary
 import qualified Data.Bits as Bits
 import qualified Data.Char as Char
@@ -84,6 +85,11 @@ invertEncoding sRaw = s == dec
     enc = Bwt.encode s
     dec = Bwt.decode enc
 
+qsortOrder :: [Int] -> Bool
+qsortOrder xs = (List.sort xs) == sorted
+  where
+    sorted = Bwt.sortListInPlace compare xs
+
 main :: IO ()
 main = do
   Qc.quickCheck invertRotstr
@@ -96,3 +102,4 @@ main = do
   Qc.quickCheck invertMtf
   Qc.quickCheck invertHuff
   Qc.quickCheck invertEncoding
+  Qc.quickCheck qsortOrder

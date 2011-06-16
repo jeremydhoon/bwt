@@ -37,7 +37,7 @@ getIx c um@(UnicodeMap c2i i2c next) = case getRank c um of
     cval = Char.ord c
     c2i' = Map.insert c cval c2i
     ahead = Map.findIndex c c2i'
-    ix = --Trace.trace ((show c) ++ ", " ++ (show ahead)) $
+    ix =
       cval +  (Map.size c2i) - ahead
     um' = put c um
 

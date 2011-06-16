@@ -5,7 +5,7 @@ import qualified Control.Monad as Monad
 import qualified Control.Monad.ST as ST
 import qualified Data.Array as Array
 import Data.Array ((!))
-import qualified Data.Array.Unboxed as UArray
+--import qualified Data.Array.Unboxed as UArray
 import qualified Data.Array.ST as STArray
 import qualified Data.Binary as Binary
 import qualified Data.Char as Char
@@ -73,12 +73,124 @@ binElements keyfn vs = STArray.runSTArray $ do
     vs
   return binArray
 
+binSizesFromIndices :: (Int -> Int) -> [Int] -> Array.Array Int Int
+binSizesFromIndices keyfn vs = STArray.runSTArray $ do
+  let ks = map keyfn vs
+  let mn = List.foldl' min (head ks) (tail ks)
+  let mx = List.foldl' max (head ks) (tail ks)
+  let limits = (mn,mx)
+  arr <- STArray.newArray limits 0
+  mapM_ (\k -> do
+    count <- STArray.readArray arr k
+    STArray.writeArray arr k (count + 1)) ks
+  return arr
+
+cumulativeBinSizes :: Array.Array Int Int -> Array.Array Int Int
+cumulativeBinSizes binSizes =
+  Array.array (mn, mx + 1) $ zip [mn..] cumSizes
+  where
+    update ns@(hd:_) n = seq hd' $ hd':ns
+      where hd' = hd + n
+    elems = Array.elems binSizes
+    (mn,mx) = Array.bounds binSizes
+    cumSizes = reverse $! List.foldl' update [0] elems
+
+distributeAndSortIndices :: (Int -> Int -> Ordering) -> (Int -> Int) -> Array.Array Int Int -> (Int, Int) -> Array.Array Int Int
+distributeAndSortIndices cmp keyfn cumSizes bounds = STArray.runSTArray $ do
+  let (mn,mx) = bounds
+  arr <- STArray.newArray bounds (-1)
+  offsets <- (STArray.thaw cumSizes) :: ((ST.ST s) (STArray.STArray s Int Int))
+  mapM_ (\i -> do
+    let k = keyfn i
+    ix <- STArray.readArray offsets k
+    STArray.writeArray offsets k (ix + 1)
+    STArray.writeArray arr ix i) [mn..mx]
+  Foldable.foldlM (\prev limit -> do
+    qsortSegment cmp arr prev (limit - 1)
+    return limit)
+    0 (List.tail $ Array.elems cumSizes)
+  elems <- STArray.getElems arr
+  return arr
+    
+sortElementsInPlace cmp keyfn bounds =
+  Array.elems $ distributeAndSortIndices cmp keyfn cumulativeSizes bounds
+  where
+    (mn,mx) = bounds
+    binSizes = binSizesFromIndices keyfn [mn..mx]
+    cumulativeSizes = cumulativeBinSizes binSizes
+  
+swapIndices arr i j = do
+  ival <- STArray.readArray arr i
+  jval <- STArray.readArray arr j
+  STArray.writeArray arr i jval
+  STArray.writeArray arr j ival
+
+partition cmp arr start end = do
+  let swap = swapIndices arr
+  pivot <- STArray.readArray arr start
+  swap start end
+  pivot' <- Foldable.foldlM (\slot i -> do
+    ival <- STArray.readArray arr i
+    case cmp ival pivot of
+      GT -> return slot
+      _ -> do
+        swap i slot
+        return (slot + 1))
+    start [start..(end - 1)]
+  swap pivot' end
+  return pivot'
+
+qsortSegment cmp arr start end = Monad.when (start < end) $ do
+  pivot <- partition cmp arr start end
+  qsortSegment cmp arr start (pivot - 1)
+  qsortSegment cmp arr (pivot + 1) end
+
+qsort cmp arr = do 
+  (start,end) <- STArray.getBounds arr
+  qsortSegment cmp arr start end
+
+qsortList cmp xs = Array.elems $ STArray.runSTArray $ do
+  let n = length xs
+  arr <- STArray.newListArray (0, n-1) xs
+  qsort cmp arr
+  return arr
+
+sortListInPlace :: (a -> a -> Ordering) -> [a] -> [a]
+sortListInPlace cmp xs = Array.elems $ STArray.runSTArray $ do
+  let len = length xs
+  arr <- STArray.newListArray (0, len-1) xs
+  qsort cmp arr
+  return arr
+
+copyInList arr start xs = Foldable.foldlM (\i x -> do
+    STArray.writeArray arr i x
+    return (i + 1))
+  start xs
+
+binsToArray bins = do
+  let binSizes = map length bins
+  let size = sum binSizes
+  arr <- STArray.newArray_ (0, size - 1) 
+  Foldable.foldlM (copyInList arr) 0 bins
+  return (arr, binSizes)
+
+sortBinArray cmp arr binSizes = do
+  Foldable.foldlM (\start size -> do
+    qsortSegment cmp arr start (start + size - 1)
+    return (start + size)) 0 binSizes
+
 sortBins :: (val -> val -> Ordering) -> Array.Array Int [val] -> [val]
+{-
 sortBins cmp bins = reverse $! List.foldl' Common.revAppend' [] $! sbins
   where
     sortFn = List.sortBy cmp
     getBinAndSort i = sortFn $! bins ! i
     sbins = map getBinAndSort $! Array.indices bins
+-}
+sortBins cmp bins = Array.elems $ STArray.runSTArray $ do
+  (arr, binSizes) <- binsToArray (Array.elems bins)
+  sortBinArray cmp arr binSizes
+  return arr
 
 bwtFast :: String -> (Int, String)
 bwtFast [] = (0, [])
@@ -105,7 +217,8 @@ bwtFast s = (ixEnd, last)
       where
         checkIx k = compare (getMod (k + i)) (getMod (k + j))
         rem = List.dropWhile (\ix -> checkIx ix == EQ) indices
-    sorted = sortBins cmp bins
+    sorted = sortElementsInPlace cmp keyfn (0, (n-1))
+    --sorted = sortBins cmp bins
     --sorted = List.sortBy cmp indices
     last = map lastMod sorted
     ixEnd = case  List.elemIndex 0 sorted of
@@ -149,7 +262,7 @@ addAndSort ss base = List.sort ss'
 type Shiftvector = DefaultArray Int Int
 
 buildBwtShiftVector :: String -> Shiftvector
-buildBwtShiftVector s = UArray.listArray (0, (length tlist) - 1) tlist
+buildBwtShiftVector s = Array.listArray (0, (length tlist) - 1) tlist
   where
     f = List.sort s
     handleChr (mSearchStr, ret) c =
@@ -167,8 +280,10 @@ seq3 a b c d = seq (seq2 a b c) d
 seq4 a b c d e = seq (seq3 a b c d) e
 
 buildBwtShiftVectorFast :: String -> Shiftvector
-buildBwtShiftVectorFast s = Array.listArray (0, (length s) - 1) tlist
+buildBwtShiftVectorFast s = Array.listArray (0, n - 1) tlist
   where
+    n = length s
+    --f = qsortList compare s
     f = List.sort s
     addIndex m (c,i) = seq3 is is' m' m'
       where
@@ -190,7 +305,7 @@ reverseBwtFast s ixEnd =
   where
     len = length s
     t = buildBwtShiftVectorFast s
-    l = (UArray.listArray (0, (length s) - 1) s) :: DefaultArray Int Char
+    l = (Array.listArray (0, (length s) - 1) s) :: DefaultArray Int Char
     getc = (l !)
     gett = (t !)
     nextChar (cs,i) _ = seq2 cs' i' (cs', i')
