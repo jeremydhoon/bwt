@@ -109,12 +109,9 @@ distributeAndSortIndices cmp keyfn cumSizes bounds = STArray.runSTUArray $ do
     ix <- STArray.readArray offs k
     STArray.writeArray offs k (ix + 1)
     STArray.writeArray arr ix i) [mn..mx]
-  --loop (\prev i -> do
   Foldable.foldlM (\prev limit -> do
-    --let limit = cumSizes UArray.! i
     qsortSegment cmp arr prev (limit - 1)
     return limit)
-    --0 1 (snd $ UArray.bounds cumSizes)
     0 (List.tail $ UArray.elems cumSizes)
   return arr
     
@@ -140,18 +137,15 @@ swapIndices arr i j = do
   writeArray arr i jval
   writeArray arr j ival
 
-{-
 loop :: (Monad m) => (a -> Int -> m a) -> a -> Int -> Int -> m a
 loop f acc start end =
   if start > end
     then
       return acc
     else do
+      let start' = start + 1
       acc' <- f acc start
-      loop f acc' (start + 1) end
--}
-
-loop f acc start end = Foldable.foldlM f acc [start..end]
+      loop f acc' (seq2 start' acc' start') end
 
 partition cmp arr start end = do
   let swap = swapIndices arr
@@ -217,6 +211,12 @@ sortBins cmp bins = reverse $! List.foldl' Common.revAppend' [] $! sbins
     getBinAndSort i = sortFn $! bins ! i
     sbins = map getBinAndSort $! Array.indices bins
 
+buildSecondKeyLookup :: (Int -> Int) -> Int -> (Int, Int) -> (Int -> Int)
+buildSecondKeyLookup keyfn keyOffset bounds = (arr UArray.!)
+  where
+    inds = map (keyfn . ((+) keyOffset)) [(fst bounds)..(snd bounds)]
+    arr = (UArray.listArray bounds inds) :: UArray.UArray Int Int
+
 bwtFast :: String -> (Int, String)
 bwtFast [] = (0, [])
 bwtFast s = (ixEnd, last)
@@ -231,9 +231,12 @@ bwtFast s = (ixEnd, last)
     shift = (maxEle - minEle) + 1
     getRank i= (Char.ord (get i)) - minEle
     getModRank i = (Char.ord (getMod i)) - minEle
-    keyfn = if n > 1 then
-      \v -> ((getRank v) * shift) + (getModRank (v+1))
-      else Char.ord . get
+    buildKeyfn count = \v -> List.foldl' (update v) 0 inds
+      where
+        update v acc i = (acc * shift) + (getModRank (v + i))
+        inds = [0..(count-1)]
+    keyOffset = min n 3
+    keyfn = buildKeyfn keyOffset
     lastMod i = fs ! ((i + (n - 1)) `mod` n)
     bins = binElements keyfn indices
     cmp i j = case rem of
@@ -242,7 +245,12 @@ bwtFast s = (ixEnd, last)
       where
         checkIx k = compare (getMod (k + i)) (getMod (k + j))
         rem = List.dropWhile (\ix -> checkIx ix == EQ) indices
-    sorted = sortElementsInPlace cmp keyfn (0, (n-1))
+    secondKey = buildSecondKeyLookup (buildKeyfn 4) keyOffset (0, n-1)
+    cmp' i j = case compare (secondKey i) (secondKey j) of
+      LT -> LT
+      GT -> GT
+      EQ -> cmp (i + keyOffset + 4) (j + keyOffset + 4)
+    sorted = sortElementsInPlace cmp' keyfn (0, (n-1))
     --sorted = sortBins cmp bins
     --sorted = List.sortBy cmp indices
     last = map lastMod sorted
