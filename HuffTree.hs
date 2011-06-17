@@ -12,7 +12,7 @@ import qualified Bitlist
 import qualified Common
 import qualified MultiHeap
 
-data HuffTree a = HuffLeaf a | HuffNode (HuffTree a) (HuffTree a)
+data HuffTree a = HuffLeaf a | HuffNode (HuffTree a) (HuffTree a) | HuffEmpty
 
 inccount :: Ord a => a -> Map.Map a Int -> Map.Map a Int
 inccount x m = Map.insert x ((Map.findWithDefault 0 x m) + 1) m
@@ -47,7 +47,7 @@ convertToCode xs dict =
   reverse $ foldl (\ret c -> Common.revAppend ret (dict Map.! c)) [] xs
 
 huffencode :: (Ord a, Show a) => [a] -> (HuffTree a, Bitlist.Bitlist)
-huffencode [] = (HuffLeaf (error "Invalid Huffman tree"), Bitlist.empty)
+huffencode [] = (HuffEmpty, Bitlist.empty)
 huffencode xs = (tree, bitlist)
   where
     tree = buildTree xs
@@ -56,6 +56,7 @@ huffencode xs = (tree, bitlist)
     bitlist = Bitlist.packBits code
 
 huffdecode :: HuffTree a -> Bitlist.Bitlist -> [a]
+huffdecode HuffEmpty _ = []
 huffdecode (HuffLeaf c) bitlist = map (\_ -> c) [1..(Bitlist.size bitlist)]
 huffdecode tree bitlist =
   if Bitlist.null bitlist then []
@@ -73,11 +74,14 @@ instance Binary.Binary a => Binary.Binary (HuffTree a) where
     Binary.put (0 :: Word.Word8)
     Binary.put c
   put (HuffNode l r) = do
-    Binary.put (1:: Word.Word8)
+    Binary.put (1 :: Word.Word8)
     Binary.put l
     Binary.put r  
+  put HuffEmpty = do
+    Binary.put (2 :: Word.Word8)
   get = do
     tag <- Binary.getWord8
     case tag of
       0 -> Monad.liftM HuffLeaf Binary.get
       1 -> Monad.liftM2 HuffNode Binary.get Binary.get
+      2 -> return HuffEmpty
