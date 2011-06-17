@@ -25,18 +25,6 @@ import qualified UnicodeMtf as Mtf
 
 type DefaultArray = Array.Array
 
---(!) = (Array.!)
-{-
-(!) :: (Show i, Show e, Ix.Ix i) => DefaultArray i e -> i -> e
-arr ! i =
-  if i >= mn && i <= mx then
-    arr Array.! i
-  else
-    error ("Invalid array access: " ++ (show i) ++ " on " ++ (show arr))
-  where
-    (mn,mx) = Array.bounds arr
--}
-
 type Fixstr = DefaultArray Int Char
 data Rotstr = Rotstr {
   rotstrFs :: Fixstr,
