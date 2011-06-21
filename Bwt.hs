@@ -11,6 +11,7 @@ import qualified Data.Array.ST as STArray
 import qualified Data.Binary as Binary
 import qualified Data.Char as Char
 import qualified Data.Foldable as Foldable
+import Data.Int (Int64)
 import qualified Data.Ix as Ix
 import qualified Data.List as List
 import qualified Data.Map as Map
@@ -47,6 +48,7 @@ instance Ord Rotstr where
 
 type IntArray = UArray.UArray Int Int
 
+{-
 binElements :: (Int -> Int) -> [Int] -> Array.Array Int [Int]
 binElements _ [] = error "binElements: cannot bin empty list"
 binElements keyfn vs = STArray.runSTArray $ do
@@ -63,6 +65,7 @@ binElements keyfn vs = STArray.runSTArray $ do
     STArray.writeArray binArray k (v:bin))
     vs
   return binArray
+-}
 
 binSizesFromIndices :: (Int -> Int) -> [Int] -> IntArray
 binSizesFromIndices keyfn vs = STArray.runSTUArray $ do
@@ -199,46 +202,48 @@ sortBins cmp bins = reverse $! List.foldl' Common.revAppend' [] $! sbins
     getBinAndSort i = sortFn $! bins ! i
     sbins = map getBinAndSort $! Array.indices bins
 
-buildSecondKeyLookup :: (Int -> Int) -> Int -> (Int, Int) -> (Int -> Int)
+buildSecondKeyLookup :: (Int -> Int64) -> Int -> (Int, Int) -> (Int -> Int64)
 buildSecondKeyLookup keyfn keyOffset bounds = (arr UArray.!)
   where
     inds = map (keyfn . ((+) keyOffset)) [(fst bounds)..(snd bounds)]
-    arr = (UArray.listArray bounds inds) :: UArray.UArray Int Int
+    arr = (UArray.listArray bounds inds) :: UArray.UArray Int Int64
 
-bwtFast :: String -> (Int, String)
+bwtFast :: [Word.Word8] -> (Int, [Word.Word8])
 bwtFast [] = (0, [])
 bwtFast s = (ixEnd, last)
   where
-    fs = buildFixstr s
-    n = (snd $ Array.bounds fs) + 1
+    n = length s
+    fs = UArray.listArray (0, n - 1) s
     indices = Array.indices fs
     get = (fs !)
     getMod i = fs ! (i `mod` n)
-    maxEle = Char.ord $! List.maximum s
-    minEle = Char.ord $! List.minimum s
-    shift = (maxEle - minEle) + 1
-    getRank i= (Char.ord (get i)) - minEle
-    getModRank i = (Char.ord (getMod i)) - minEle
-    buildKeyfn count = \v -> List.foldl' (update v) 0 inds
+    maxEle =
+      Exception.assert ((fromIntegral $ (minBound :: Word.Word8)) == 0) $
+      fromIntegral (maxBound :: Word.Word8)
+    shift = maxEle + 1
+    getRank i= (fromIntegral (get i))
+    getModRank i = (fromIntegral (getMod i))
+    buildKeyfn count = \v -> List.foldl' (update v) (0 :: Int64) inds
       where
         update v acc i = (acc * shift) + (getModRank (v + i))
         inds = [0..(count-1)]
-    keyOffset = min n 3
+    keyOffset = min n 2
     keyfn = buildKeyfn keyOffset
     lastMod i = fs ! ((i + (n - 1)) `mod` n)
-    bins = binElements keyfn indices
     cmp i j = case rem of
       [] -> EQ
       (hd:_) -> checkIx hd
       where
         checkIx k = compare (getMod (k + i)) (getMod (k + j))
         rem = List.dropWhile (\ix -> checkIx ix == EQ) indices
-    secondKey = buildSecondKeyLookup (buildKeyfn 4) keyOffset (0, n-1)
+    int64Width = 8
+    secondKey = buildSecondKeyLookup (buildKeyfn int64Width) keyOffset (0, n-1)
+    secondKeyOffset = keyOffset + int64Width
     cmp' i j = case compare (secondKey i) (secondKey j) of
       LT -> LT
       GT -> GT
-      EQ -> cmp (i + keyOffset + 4) (j + keyOffset + 4)
-    sorted = sortElementsInPlace cmp' keyfn (0, (n-1))
+      EQ -> cmp (i + secondKeyOffset) (j + secondKeyOffset)
+    sorted = sortElementsInPlace cmp' (fromIntegral . keyfn) (0, (n-1))
     --sorted = sortBins cmp bins
     --sorted = List.sortBy cmp indices
     last = map lastMod sorted
@@ -300,7 +305,7 @@ seq2 a b c = seq (seq a b) c
 seq3 a b c d = seq (seq2 a b c) d
 seq4 a b c d e = seq (seq3 a b c d) e
 
-buildBwtShiftVectorFast :: String -> Shiftvector
+buildBwtShiftVectorFast :: [Word.Word8] -> Shiftvector
 buildBwtShiftVectorFast s = Array.listArray (0, n - 1) tlist
   where
     n = length s
@@ -319,14 +324,14 @@ buildBwtShiftVectorFast s = Array.listArray (0, n - 1) tlist
         tlist' = hd:tlist
     tlist = snd $ List.foldl' removeIndex (charIndices,[]) $! reverse s
 
-reverseBwtFast :: String -> Int -> String
+reverseBwtFast :: [Word.Word8] -> Int -> [Word.Word8]
 reverseBwtFast [] _ = []
 reverseBwtFast s ixEnd =
   Exception.assert (ixEnd <= (length s) && ixEnd >= 0) s'
   where
     len = length s
     t = buildBwtShiftVectorFast s
-    l = (Array.listArray (0, (length s) - 1) s) :: DefaultArray Int Char
+    l = (Array.listArray (0, (length s) - 1) s) :: DefaultArray Int Word.Word8
     getc = (l !)
     gett = (t !)
     nextChar (cs,i) _ = seq2 cs' i' (cs', i')
@@ -406,7 +411,7 @@ data CodedBlock = CodedBlock {
      codedblockSymbolsBits :: Bitlist.Bitlist
 }
 
-encode :: String -> CodedBlock
+encode :: [Word.Word8] -> CodedBlock
 encode [] = error "Cannot encode an empty string."
 encode xs =
   CodedBlock ixEnd treeLengths treeSymbols bitsIsRl bitsLengths bitsSymbols
@@ -420,7 +425,7 @@ encode xs =
     (treeSymbols,bitsSymbols) = log "huff symbols" $! Huff.huffencode symbols
     bitsIsRl = Bitlist.packBits $! buildIsRlList rl
 
-decode :: CodedBlock -> String
+decode :: CodedBlock -> [Word.Word8]
 decode (CodedBlock ixEnd treeLen treeSymb bitsIsRl bitsLen bitsSym) = s
   where
     log a b = b -- Trace.trace a b

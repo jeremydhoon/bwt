@@ -3,6 +3,7 @@ module Main where
 import qualified Data.Binary as Binary
 import qualified Data.ByteString.Lazy as ByteString
 import qualified Data.List as List
+import qualified Data.Word as Word
 import qualified System
 import qualified System.Console.GetOpt as GetOpt
 import qualified System.IO as IO
@@ -27,17 +28,17 @@ options = [GetOpt.Option ['c'] ["encode"] (GetOpt.NoArg OptEncode)
              (GetOpt.ReqArg OptBlocksize (show defaultBlocksize))
              "characters per block"]
 
-nextBlock :: Int -> [Bwt.CodedBlock] -> String -> [Bwt.CodedBlock]
+nextBlock :: Int -> [Bwt.CodedBlock] -> [Word.Word8] -> [Bwt.CodedBlock]
 nextBlock blocksize acc s = case blockS of
   [] -> reverse acc
   bs -> nextBlock blocksize ((Bwt.encode bs):acc) s'
   where
     (blockS, s') = List.splitAt blocksize s
 
-compressBlocks :: String -> Int -> [Bwt.CodedBlock]
+compressBlocks :: [Word.Word8] -> Int -> [Bwt.CodedBlock]
 compressBlocks s blocksize = nextBlock blocksize [] s
 
-decodeBlocks :: [Bwt.CodedBlock] -> String
+decodeBlocks :: [Bwt.CodedBlock] -> [Word.Word8]
 decodeBlocks = reverse . (List.foldl' Common.revAppend []) . (map Bwt.decode)
 
 extractEncodingDirection :: [Option] -> Maybe Option
@@ -56,7 +57,7 @@ extractBlocksize [] = defaultBlocksize
 extractBlocksize ((OptBlocksize si):_)= read si
 extractBlocksize (_:rest) = extractBlocksize rest
 
-data Result = EncodeResult [Bwt.CodedBlock] | DecodeResult String
+data Result = EncodeResult [Bwt.CodedBlock] | DecodeResult [Word.Word8]
   | Error String
 
 main :: IO ()
@@ -66,12 +67,12 @@ main = do
     (opts,[],[]) -> do
       let blocksize = extractBlocksize opts
       let encdir = extractEncodingDirection opts
+      input <- ByteString.getContents
       case encdir of
         Just OptEncode -> do
-          input <- IO.getContents
-          return $ EncodeResult $ compressBlocks input blocksize
-        Just OptDecode -> do
-          input <- ByteString.getContents
+          let bytes = ByteString.unpack input
+          return $ EncodeResult $ compressBlocks bytes blocksize
+        Just OptDecode ->
           return $ DecodeResult $ decodeBlocks $ Binary.decode input
         Nothing -> return $ Error "only one of 'x' and 'c' may be specified."
           
@@ -80,5 +81,5 @@ main = do
       return $ Error "Invalid arguments."
   case result of
     EncodeResult chunks -> ByteString.putStr $ Binary.encode chunks
-    DecodeResult cs -> putStr cs
+    DecodeResult cs -> ByteString.putStr $ ByteString.pack cs
     Error s -> IO.hPutStrLn IO.stderr s
