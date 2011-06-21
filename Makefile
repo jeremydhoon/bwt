@@ -4,7 +4,10 @@ HASKELL = ghc
 OPTHASKELL = -O2 -funbox-strict-fields
 OPTC = -fvia-C -optc-O6 -optc-mtune=native -optc-O3 -optc-funroll-loops
 TARGET = bwt
+TESTTARGET = testbwt
 MAIN = Main.hs
+TESTMAIN = TestBwt.hs
+TESTMAINFUNC = TestBwt.main
 PROF = -prof -auto-all
 
 all:
@@ -18,3 +21,5 @@ copt:
 
 clean:
 	rm *.o *.hi
+test:
+	$(HASKELL) -o $(TESTTARGET) $(PROF) -main-is $(TESTMAINFUNC) --make $(TESTMAIN)

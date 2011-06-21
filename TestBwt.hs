@@ -7,6 +7,7 @@ import qualified Data.Binary as Binary
 import qualified Data.Bits as Bits
 import qualified Data.Char as Char
 import qualified Data.List as List
+import qualified Data.Word as Word
 import qualified Test.QuickCheck as Qc
 import qualified Debug.Trace as Trace
 
@@ -18,19 +19,24 @@ import qualified UnicodeMtf as Mtf
 instance Qc.Arbitrary Char where
   arbitrary = Qc.choose ('a', 'c') -- ('\0', '\255')
 
+instance Qc.Arbitrary Word.Word8 where
+  arbitrary = do
+    i <- Qc.choose (0, 255) --(Char.ord 'a', Char.ord 'c')
+    return $ fromIntegral (i :: Int)
+
 invertRotstr :: String -> Bool
 invertRotstr s =
   s == (Bwt.stringFromRotstr $ (buildRotstrZero . Bwt.buildFixstr) s)
   where
     buildRotstrZero fs = Bwt.buildRotstr fs 0
 
-invertBwt :: String -> Bool
+invertBwt :: [Word.Word8] -> Bool
 invertBwt s = s == dec
   where
     (brk,s') = Bwt.bwtFast s
     dec = Bwt.reverseBwtFast s' brk
 
-shiftVectorsMatch :: String -> Bool
+shiftVectorsMatch :: [Word.Word8] -> Bool
 shiftVectorsMatch s = s == result
   where
     t = Bwt.buildBwtShiftVectorFast s
@@ -38,10 +44,10 @@ shiftVectorsMatch s = s == result
     recover = (f !!)
     result = map recover $ UArray.elems t
 
-invertRle :: String -> Bool
+invertRle :: [Word.Word8] -> Bool
 invertRle s = s == (Bwt.runLengthDecode $ Bwt.runLengthEncode s)
 
-invertExpandedRle :: String -> Bool
+invertExpandedRle :: [Word.Word8] -> Bool
 invertExpandedRle s =
   s == (Bwt.runLengthDecodePairs $ Bwt.expandRlList $ Bwt.runLengthEncode s)
 
@@ -65,23 +71,23 @@ invertPacking fs = --Trace.trace ((show fs) ++ ", " ++ (show unpacked)) $
   where
     unpacked = Bitlist.unpackBits (Bitlist.packBits fs)
 
-invertMtf :: String -> Bool
+invertMtf :: [Word.Word8] -> Bool
 invertMtf s = s == dec
   where
     enc = Mtf.mtf s
     dec = Mtf.reverseMtf enc
 
-invertHuff :: String -> Bool
+invertHuff :: [Word.Word8] -> Bool
 invertHuff sRaw = s == dec
   where
-    s = 'a':'b':sRaw
+    s = 0:1:sRaw
     (tree,bitlist) = Huff.huffencode s
     dec = Huff.huffdecode tree bitlist
 
-invertEncoding :: String -> Bool
+invertEncoding :: [Word.Word8] -> Bool
 invertEncoding sRaw = s == dec
   where
-    s = 'a':sRaw
+    s = 0:sRaw
     enc = Bwt.encode s
     dec = Bwt.decode enc
 
@@ -92,6 +98,7 @@ qsortOrder xs = (List.sort xs) == sorted
 
 main :: IO ()
 main = do
+  Qc.quickCheck invertBwt
   Qc.quickCheck invertRotstr
   Qc.quickCheck invertBwt
   Qc.quickCheck shiftVectorsMatch

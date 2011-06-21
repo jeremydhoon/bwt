@@ -48,25 +48,6 @@ instance Ord Rotstr where
 
 type IntArray = UArray.UArray Int Int
 
-{-
-binElements :: (Int -> Int) -> [Int] -> Array.Array Int [Int]
-binElements _ [] = error "binElements: cannot bin empty list"
-binElements keyfn vs = STArray.runSTArray $ do
-  let hd = keyfn $ head vs
-  let extrema (mn,mx) k = (min mn k, max mx k)
-  let keys = map keyfn vs
-  let mn = List.foldl' min hd keys
-  let mx = List.foldl' max hd keys
-  let limits = (mn,mx)
-  binArray <- STArray.newArray limits []
-  mapM_ (\v -> do
-    let k = keyfn v
-    bin <- (STArray.readArray binArray k)
-    STArray.writeArray binArray k (v:bin))
-    vs
-  return binArray
--}
-
 binSizesFromIndices :: (Int -> Int) -> [Int] -> IntArray
 binSizesFromIndices keyfn vs = STArray.runSTUArray $ do
   let ks = map keyfn vs
@@ -74,14 +55,13 @@ binSizesFromIndices keyfn vs = STArray.runSTUArray $ do
   let mx = List.foldl' max (head ks) (tail ks)
   let limits = (mn,mx)
   arr <- STArray.newArray limits 0
-  mapM_ (\k -> do
+  Monad.forM_ ks (\k -> do
     count <- STArray.readArray arr k
-    STArray.writeArray arr k (count + 1)) ks
+    STArray.writeArray arr k (count + 1))
   return arr
 
 cumulativeBinSizes :: IntArray -> IntArray
-cumulativeBinSizes binSizes =
-  UArray.array (mn, mx + 1) $ zip [mn..] cumSizes
+cumulativeBinSizes binSizes = UArray.array (mn, mx + 1) $ zip [mn..] cumSizes
   where
     update ns@(hd:_) n = seq hd' $ hd':ns
       where hd' = hd + n
@@ -106,7 +86,7 @@ distributeAndSortIndices cmp keyfn cumSizes bounds = STArray.runSTUArray $ do
     0 (List.tail $ UArray.elems cumSizes)
   return arr
     
-sortElementsInPlace cmp keyfn bounds =
+sortElementsInPlace cmp keyfn bounds = 
   UArray.elems $ distributeAndSortIndices cmp keyfn cumulativeSizes bounds
   where
     (mn,mx) = bounds
@@ -114,13 +94,12 @@ sortElementsInPlace cmp keyfn bounds =
     cumulativeSizes = cumulativeBinSizes binSizes
   
 readArray :: STArray.STUArray s Int Int -> Int -> (ST.ST s) Int
-readArray = BaseArray.unsafeRead
+--readArray = BaseArray.unsafeRead
+readArray = STArray.readArray
 
 writeArray :: STArray.STUArray s Int Int -> Int -> Int -> (ST.ST s) ()
-writeArray = BaseArray.unsafeWrite
-
---readArray = STArray.readArray
---writeArray = STArray.writeArray
+--writeArray = BaseArray.unsafeWrite
+writeArray = STArray.writeArray
 
 swapIndices arr i j = do
   ival <- readArray arr i
@@ -178,30 +157,6 @@ sortListInPlace cmp xs = UArray.elems $ STArray.runSTUArray $ do
   qsort cmp arr
   return arr
 
-copyInList arr start xs = Foldable.foldlM (\i x -> do
-    STArray.writeArray arr i x
-    return (i + 1))
-  start xs
-
-binsToArray bins = do
-  let binSizes = map length bins
-  let size = sum binSizes
-  arr <- STArray.newArray_ (0, size - 1) 
-  Foldable.foldlM (copyInList arr) 0 bins
-  return (arr, binSizes)
-
-sortBinArray cmp arr binSizes = do
-  Foldable.foldlM (\start size -> do
-    qsortSegment cmp arr start (start + size - 1)
-    return (start + size)) 0 binSizes
-
-sortBins :: (val -> val -> Ordering) -> Array.Array Int [val] -> [val]
-sortBins cmp bins = reverse $! List.foldl' Common.revAppend' [] $! sbins
-  where
-    sortFn = List.sortBy cmp
-    getBinAndSort i = sortFn $! bins ! i
-    sbins = map getBinAndSort $! Array.indices bins
-
 buildSecondKeyLookup :: (Int -> Int64) -> Int -> (Int, Int) -> (Int -> Int64)
 buildSecondKeyLookup keyfn keyOffset bounds = (arr UArray.!)
   where
@@ -243,7 +198,12 @@ bwtFast s = (ixEnd, last)
       LT -> LT
       GT -> GT
       EQ -> cmp (i + secondKeyOffset) (j + secondKeyOffset)
-    sorted = sortElementsInPlace cmp' (fromIntegral . keyfn) (0, (n-1))
+    inPlaceLimit = fromIntegral $ (maxEle ^ keyOffset) `div` 4
+    sorted =
+      if n < inPlaceLimit then
+        List.sortBy cmp indices
+      else
+        sortElementsInPlace cmp' (fromIntegral . keyfn) (0, (n-1))
     --sorted = sortBins cmp bins
     --sorted = List.sortBy cmp indices
     last = map lastMod sorted

@@ -17,13 +17,15 @@ defaultBlocksize = 800000
 defaultEncodingDirection :: Option
 defaultEncodingDirection = OptEncode
 
-data Option = OptEncode | OptDecode | OptBlocksize String
+data Option = OptEncode | OptDecode | OptBwt | OptBlocksize String deriving Eq
 
 options :: [GetOpt.OptDescr Option]
 options = [GetOpt.Option ['c'] ["encode"] (GetOpt.NoArg OptEncode)
              "encode input",
            GetOpt.Option ['x'] ["decode"] (GetOpt.NoArg OptDecode)
              "decode input",
+           GetOpt.Option ['w'] ["bwt"] (GetOpt.NoArg OptBwt)
+             "bwt transform input",
            GetOpt.Option ['b'] ["blocksize"]
              (GetOpt.ReqArg OptBlocksize (show defaultBlocksize))
              "characters per block"]
@@ -46,11 +48,16 @@ extractEncodingDirection opts = check Nothing opts
   where
     check Nothing [] = Just defaultEncodingDirection
     check found@(Just _) [] = found
-    check (Just OptEncode) (OptEncode:_) = Nothing
-    check (Just OptDecode) (OptDecode:_) = Nothing
-    check Nothing (OptEncode:rest) = check (Just OptEncode) rest
-    check Nothing (OptDecode:rest) = check (Just OptDecode) rest
-    check found (_:rest) = check found rest
+    check found@(Just opt) (hd:rest) =
+      if opt == hd then check found rest
+      else Nothing
+    check Nothing (hd:rest) = check found rest
+      where
+        found = case hd of
+          OptEncode -> Just OptEncode
+          OptDecode -> Just OptDecode
+          OptBwt -> Just OptBwt
+          _ -> Nothing
 
 extractBlocksize :: [Option] -> Int
 extractBlocksize [] = defaultBlocksize
@@ -58,7 +65,7 @@ extractBlocksize ((OptBlocksize si):_)= read si
 extractBlocksize (_:rest) = extractBlocksize rest
 
 data Result = EncodeResult [Bwt.CodedBlock] | DecodeResult [Word.Word8]
-  | Error String
+  | Error String | BwtResult (Int, [Word.Word8])
 
 main :: IO ()
 main = do
@@ -68,12 +75,14 @@ main = do
       let blocksize = extractBlocksize opts
       let encdir = extractEncodingDirection opts
       input <- ByteString.getContents
+      let bytes = ByteString.unpack input
       case encdir of
         Just OptEncode -> do
-          let bytes = ByteString.unpack input
           return $ EncodeResult $ compressBlocks bytes blocksize
         Just OptDecode ->
           return $ DecodeResult $ decodeBlocks $ Binary.decode input
+        Just OptBwt ->
+          return $ BwtResult $ Bwt.bwtFast bytes
         Nothing -> return $ Error "only one of 'x' and 'c' may be specified."
           
     (_,_,errors) -> do
@@ -82,4 +91,5 @@ main = do
   case result of
     EncodeResult chunks -> ByteString.putStr $ Binary.encode chunks
     DecodeResult cs -> ByteString.putStr $ ByteString.pack cs
+    BwtResult bs -> ByteString.putStr $ Binary.encode bs
     Error s -> IO.hPutStrLn IO.stderr s
